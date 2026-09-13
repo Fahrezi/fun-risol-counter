@@ -1,0 +1,14 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "risol-counter-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-09-11",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "risol-counter-db",
+			"database_id": "0893d9d4-be14-4171-bdf8-44affad4dfad",
+			"migrations_dir": "migrations"
+		}
+	]
+}
