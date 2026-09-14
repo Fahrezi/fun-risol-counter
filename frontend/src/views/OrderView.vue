@@ -1,21 +1,36 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, type Customer, type Food, type Order } from '../lib/api'
 import FoodIcon from '../components/FoodIcon.vue'
 import CustomerAvatar from '../components/CustomerAvatar.vue'
+import {
+  useCreateOrderMutation,
+  useCustomersQuery,
+  useFoodsQuery,
+  useOrdersQuery,
+  useStockQuery,
+} from '../lib/queries'
 
 const router = useRouter()
 
-const foods = ref<Food[]>([])
-const orders = ref<Order[]>([])
-const customers = ref<Customer[]>([])
+const { data: foodsData, isPending: foodsLoading } = useFoodsQuery()
+const { data: stockData, refetch: refetchStock } = useStockQuery()
+const { data: ordersData } = useOrdersQuery()
+const { data: customersData } = useCustomersQuery()
+const createOrder = useCreateOrderMutation()
+
+const foods = computed(() => foodsData.value ?? [])
+const stock = computed(() => stockData.value ?? [])
+const orders = computed(() => ordersData.value ?? [])
+const customers = computed(() => customersData.value ?? [])
+
 const selectedCustomerName = ref('')
 const pickerOpen = ref(false)
 const draft = reactive<Record<string, number>>({})
 const pileExpanded = ref(false)
-const submitting = ref(false)
 const errorMsg = ref('')
+const stockWarning = ref('')
+const submitting = computed(() => createOrder.isPending.value)
 
 const currency = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -23,13 +38,13 @@ const currency = new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 })
 
-async function load() {
-  foods.value = await api.getFoods()
-  orders.value = await api.getOrders()
-  customers.value = await api.getCustomers()
+function stockOf(foodId: string) {
+  return stock.value.find((s) => s.id === foodId)?.qty ?? 0
 }
 
-onMounted(load)
+function isOutOfStock(foodId: string) {
+  return stockOf(foodId) <= 0
+}
 
 const loyalCustomers = computed(() => {
   const map = new Map<string, { count: number; total: number }>()
@@ -67,13 +82,27 @@ function qtyOf(foodId: string) {
 }
 
 function addToBasket(foodId: string) {
-  draft[foodId] = (draft[foodId] ?? 0) + 1
+  const food = foods.value.find((f) => f.id === foodId)
+  if (!food || isOutOfStock(foodId)) return
+  const next = (draft[foodId] ?? 0) + 1
+  if (next > stockOf(foodId)) {
+    stockWarning.value = `Stok ${food.name} tersisa ${stockOf(foodId)}.`
+    return
+  }
+  stockWarning.value = ''
+  draft[foodId] = next
 }
 
 function decFromBasket(foodId: string) {
   const next = (draft[foodId] ?? 0) - 1
   if (next <= 0) delete draft[foodId]
   else draft[foodId] = next
+}
+
+function resetDraft() {
+  for (const key of Object.keys(draft)) delete draft[key]
+  errorMsg.value = ''
+  stockWarning.value = ''
 }
 
 const draftItems = computed(() =>
@@ -94,20 +123,22 @@ async function submitOrder() {
     errorMsg.value = 'Pilih minimal satu makanan.'
     return
   }
-  submitting.value = true
+  await refetchStock()
+  const shortage = draftItems.value.find((i) => i.qty > stockOf(i.food.id))
+  if (shortage) {
+    errorMsg.value = `Stok ${shortage.food.name} tersisa ${stockOf(shortage.food.id)}, kurangi jumlah pesanan.`
+    return
+  }
   try {
-    await api.createOrder({
+    await createOrder.mutateAsync({
       listName: selectedCustomerName.value,
       items: draftItems.value.map((i) => ({ foodId: i.food.id, qty: i.qty })),
     })
     selectedCustomerName.value = ''
     pileExpanded.value = false
     for (const key of Object.keys(draft)) delete draft[key]
-    await load()
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : 'Gagal menyimpan pesanan.'
-  } finally {
-    submitting.value = false
   }
 }
 </script>
@@ -115,6 +146,8 @@ async function submitOrder() {
 <template>
   <section class="panel">
     <h2 class="panel-title">Buat Pesanan</h2>
+    <p v-if="stockWarning" class="error-text mb-2">{{ stockWarning }}</p>
+    <p v-if="foodsLoading" class="empty-text">Memuat menu...</p>
     <span class="field">
       <span>Nama Pemesan</span>
       <button
@@ -131,7 +164,13 @@ async function submitOrder() {
         v-for="f in foods"
         :key="f.id"
         type="button"
-        class="relative flex flex-col items-center gap-2 text-center bg-white border-[3px] border-ink shadow-[4px_4px_0_#000] py-4.5 px-3 cursor-pointer active:translate-x-1 active:translate-y-1 active:shadow-none"
+        class="relative flex flex-col items-center gap-2 text-center border-[3px] border-ink py-4.5 px-3"
+        :class="
+          isOutOfStock(f.id)
+            ? 'bg-gray-100 grayscale opacity-60 cursor-not-allowed shadow-none'
+            : 'bg-white shadow-[4px_4px_0_#000] cursor-pointer active:translate-x-1 active:translate-y-1 active:shadow-none'
+        "
+        :disabled="isOutOfStock(f.id)"
         @click="addToBasket(f.id)"
       >
         <span
@@ -140,9 +179,15 @@ async function submitOrder() {
         >
           {{ qtyOf(f.id) }}
         </span>
-        <FoodIcon :icon="f.icon" :size="40" />
+        <FoodIcon :icon="f.icon" :size="64" />
         <span class="font-extrabold text-[0.92rem] text-ink">{{ f.name }}</span>
         <span class="font-bold text-[0.78rem] text-muted">{{ currency.format(f.price) }}</span>
+        <span
+          class="font-bold text-[0.72rem] uppercase"
+          :class="stockOf(f.id) > 0 ? 'text-muted' : 'text-[#ff4d6d]'"
+        >
+          {{ stockOf(f.id) > 0 ? `Stok: ${stockOf(f.id)}` : 'Stok Habis' }}
+        </span>
       </button>
     </div>
   </section>
@@ -240,14 +285,24 @@ async function submitOrder() {
         <span>{{ currency.format(draftTotal) }}</span>
       </div>
       <p v-if="errorMsg" class="text-[#ff8a80] text-[0.85rem] font-bold mb-2">{{ errorMsg }}</p>
-      <button
-        type="button"
-        class="w-full bg-accent text-ink border-[3px] border-ink px-4.5 py-3.25 font-black uppercase cursor-pointer shadow-[4px_4px_0_#ff4d6d] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:opacity-60 disabled:cursor-default"
-        :disabled="submitting"
-        @click="submitOrder"
-      >
-        Simpan Pesanan
-      </button>
+      <div class="flex gap-2.5">
+        <button
+          type="button"
+          class="shrink-0 bg-white text-ink border-[3px] border-ink px-4.5 py-3.25 font-black uppercase cursor-pointer shadow-[4px_4px_0_#ff4d6d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+          :disabled="submitting"
+          @click="resetDraft"
+        >
+          Reset
+        </button>
+        <button
+          type="button"
+          class="flex-1 bg-accent text-ink border-[3px] border-ink px-4.5 py-3.25 font-black uppercase cursor-pointer shadow-[4px_4px_0_#ff4d6d] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:opacity-60 disabled:cursor-default"
+          :disabled="submitting"
+          @click="submitOrder"
+        >
+          Simpan Pesanan
+        </button>
+      </div>
     </div>
   </div>
 </template>

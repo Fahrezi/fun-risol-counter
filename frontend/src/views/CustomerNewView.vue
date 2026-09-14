@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../lib/api'
+import { useCreateCustomerMutation } from '../lib/queries'
 
 const name = ref('')
 const errorMsg = ref('')
-const submitting = ref(false)
 const router = useRouter()
+const createCustomer = useCreateCustomerMutation()
+const submitting = createCustomer.isPending
 
 async function submit() {
   errorMsg.value = ''
@@ -14,14 +15,11 @@ async function submit() {
     errorMsg.value = 'Nama tidak boleh kosong.'
     return
   }
-  submitting.value = true
   try {
-    await api.createCustomer({ name: name.value.trim() })
+    await createCustomer.mutateAsync({ name: name.value.trim() })
     router.push('/owner')
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : 'Gagal menyimpan pelanggan.'
-  } finally {
-    submitting.value = false
   }
 }
 </script>

@@ -1,12 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { api, type Order } from '../lib/api'
+import { computed, ref } from 'vue'
+import type { Order } from '../lib/api'
 import CustomerAvatar from '../components/CustomerAvatar.vue'
+import FoodIcon from '../components/FoodIcon.vue'
+import { useOrdersQuery, useStockQuery } from '../lib/queries'
 
 type Range = 'daily' | 'weekly' | 'all'
 
-const orders = ref<Order[]>([])
+const { data: ordersData } = useOrdersQuery()
+const orders = computed(() => ordersData.value ?? [])
+const { data: stockData } = useStockQuery()
+const stock = computed(() => stockData.value ?? [])
 const leaderboardOpen = ref(false)
+const stockOpen = ref(false)
+const historyCustomer = ref<string | null>(null)
 const range = ref<Range>('all')
 
 const currency = new Intl.NumberFormat('id-ID', {
@@ -15,12 +22,45 @@ const currency = new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 })
 
-function maskCurrency(amount: number) {
-  return currency.format(amount).replace(/\d/g, 'X')
+const fullDateWeekdayFmt = new Intl.DateTimeFormat('id-ID', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+})
+
+function formatFullDate(iso: string) {
+  return fullDateWeekdayFmt.format(new Date(iso))
 }
 
-onMounted(async () => {
-  orders.value = await api.getOrders()
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+}
+
+function dateKey(iso: string) {
+  return new Date(iso).toDateString()
+}
+
+function openHistory(name: string) {
+  historyCustomer.value = name
+}
+
+function closeHistory() {
+  historyCustomer.value = null
+}
+
+const customerHistoryGroups = computed(() => {
+  if (!historyCustomer.value) return []
+  const map = new Map<string, Order[]>()
+  for (const o of orders.value) {
+    if (o.listName !== historyCustomer.value) continue
+    const key = dateKey(o.createdAt)
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(o)
+  }
+  return Array.from(map.values())
+    .filter((list) => list.length > 0)
+    .map((list) => ({ label: formatFullDate(list[0]!.createdAt), orders: list }))
 })
 
 function startOfDay(d: Date) {
@@ -129,10 +169,27 @@ function rankClass(idx: number) {
       <section v-for="b in buyerSummaries" :key="b.name" class="panel mb-0">
         <div class="flex items-center gap-3">
           <CustomerAvatar :name="b.name" :size="48" />
-          <div>
+          <div class="flex-1 min-w-0">
             <h3 class="m-0 text-[1.05rem] font-extrabold">{{ b.name }}</h3>
-            <p class="mt-0.5 mb-0 font-black text-accent2">{{ maskCurrency(b.total) }}</p>
+            <p class="mt-0.5 mb-0 font-black text-accent2">{{ currency.format(b.total) }}</p>
           </div>
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Riwayat Pesanan"
+            @click="openHistory(b.name)"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M1 12s4-7.5 11-7.5S23 12 23 12s-4 7.5-11 7.5S1 12 1 12z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linejoin="round"
+              />
+              <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </button>
         </div>
       </section>
     </div>
@@ -149,6 +206,54 @@ function rankClass(idx: number) {
         <rect x="17" y="3" width="4" height="18" fill="#0a0a0a" />
       </svg>
     </button>
+
+    <button
+      type="button"
+      class="fixed right-5 bottom-22 w-14.5 h-14.5 bg-lime border-[3px] border-ink shadow-[4px_4px_0_#000] flex items-center justify-center cursor-pointer z-40 active:translate-x-1 active:translate-y-1 active:shadow-none"
+      aria-label="Sisa Stok"
+      @click="stockOpen = true"
+    >
+      <svg viewBox="0 0 24 24" width="26" height="26">
+        <path
+          d="M4 8l8-4 8 4-8 4-8-4zm0 0v8l8 4 8-4V8"
+          fill="none"
+          stroke="#0a0a0a"
+          stroke-width="2"
+          stroke-linejoin="round"
+        />
+        <path d="M12 12v8" stroke="#0a0a0a" stroke-width="2" />
+      </svg>
+    </button>
+
+    <div v-if="stockOpen" class="modal-overlay" @click.self="stockOpen = false">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3>Sisa Stok</h3>
+          <button type="button" class="modal-close" @click="stockOpen = false">X</button>
+        </div>
+
+        <p v-if="stock.length" class="text-[0.8rem] font-bold text-muted mb-3">
+          {{ formatFullDate(stock[0]!.stockDate) }}
+        </p>
+        <p v-if="!stock.length" class="empty-text">Belum ada menu.</p>
+        <ul class="list-none m-0 p-0 flex flex-col gap-2.5">
+          <li
+            v-for="s in stock"
+            :key="s.id"
+            class="flex items-center gap-3 border-2 border-ink px-3 py-2 bg-white"
+          >
+            <FoodIcon :icon="s.icon" :size="32" />
+            <span class="font-bold flex-1">{{ s.name }}</span>
+            <span
+              class="font-black text-[0.85rem] uppercase"
+              :class="s.qty > 0 ? 'text-ink' : 'text-accent2'"
+            >
+              {{ s.qty > 0 ? `Sisa ${s.qty}` : 'Habis' }}
+            </span>
+          </li>
+        </ul>
+      </div>
+    </div>
 
     <div v-if="leaderboardOpen" class="modal-overlay" @click.self="leaderboardOpen = false">
       <div class="modal-box">
@@ -208,6 +313,35 @@ function rankClass(idx: number) {
             <span class="font-bold">{{ c.name }}</span>
           </li>
         </ul>
+      </div>
+    </div>
+
+    <div v-if="historyCustomer" class="modal-overlay" @click.self="closeHistory">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3>Riwayat {{ historyCustomer }}</h3>
+          <button type="button" class="modal-close" @click="closeHistory">X</button>
+        </div>
+
+        <p v-if="!customerHistoryGroups.length" class="empty-text">Belum ada pesanan.</p>
+        <div v-for="group in customerHistoryGroups" :key="group.label" class="mb-5 last:mb-0">
+          <h4
+            class="inline-block mb-2.5 bg-lime border-[2.5px] border-ink px-2.5 py-1 text-[0.8rem] font-black uppercase text-ink"
+          >
+            {{ group.label }}
+          </h4>
+          <ul class="list-none p-0 m-0 flex flex-col gap-2.5">
+            <li v-for="o in group.orders" :key="o.id" class="bg-white border-2 border-ink px-3 py-2">
+              <div class="flex justify-between items-center mb-1.5">
+                <span class="text-muted text-[0.78rem] font-bold">{{ formatTime(o.createdAt) }}</span>
+                <span class="font-black">{{ currency.format(o.total) }}</span>
+              </div>
+              <ul class="list-none p-0 m-0 text-[0.85rem] font-semibold text-ink">
+                <li v-for="it in o.items" :key="it.foodId">{{ it.name }} x{{ it.qty }}</li>
+              </ul>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   </div>

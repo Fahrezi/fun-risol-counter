@@ -25,11 +25,30 @@ export interface Customer {
   name: string
 }
 
+export interface FoodStock {
+  id: string
+  name: string
+  price: number
+  icon: string
+  qty: number
+  stockDate: string
+}
+
+export interface StockHistoryEntry {
+  id: number
+  foodId: string
+  foodName: string
+  qty: number
+  stockDate: string
+  archivedAt: string
+}
+
 const BASE = import.meta.env.VITE_API_BASE ?? '/api'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     ...options,
   })
   if (!res.ok) throw new Error(await res.text())
@@ -55,4 +74,13 @@ export const api = {
 
   verifySecret: (value: string) =>
     request<{ ok: boolean }>('/auth/verify', { method: 'POST', body: JSON.stringify({ value }) }),
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+
+  getStock: () => request<FoodStock[]>('/stock'),
+  setStock: (foodId: string, qty: number) =>
+    request<{ foodId: string; qty: number; stockDate: string }>(`/stock/${foodId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ qty }),
+    }),
+  getStockHistory: () => request<StockHistoryEntry[]>('/stock/history'),
 }

@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { api, type Order } from '../lib/api'
+import { computed } from 'vue'
+import type { Order } from '../lib/api'
+import { useDeleteOrderMutation, useOrdersQuery } from '../lib/queries'
 
-const orders = ref<Order[]>([])
+const { data: ordersData } = useOrdersQuery()
+const deleteOrder = useDeleteOrderMutation()
+
+const orders = computed(() => ordersData.value ?? [])
 
 const currency = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -10,15 +14,8 @@ const currency = new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 })
 
-async function load() {
-  orders.value = await api.getOrders()
-}
-
-onMounted(load)
-
-async function removeOrder(id: string) {
-  await api.deleteOrder(id)
-  await load()
+function removeOrder(id: string) {
+  deleteOrder.mutate(id)
 }
 
 function formatTime(iso: string) {

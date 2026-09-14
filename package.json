@@ -1,0 +1,10 @@
+{
+  "name": "risol-counter",
+  "private": true,
+  "scripts": {
+    "migrate:remote": "npm run db:migrate:remote --prefix worker",
+    "deploy:worker": "npm run deploy --prefix worker",
+    "deploy:frontend": "npm run deploy --prefix frontend",
+    "deploy": "npm run migrate:remote && npm run deploy:worker && npm run deploy:frontend"
+  }
+}

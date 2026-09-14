@@ -6,7 +6,7 @@
       <span
         class="shine-sweep relative flex items-center justify-center w-[68px] h-[68px] sm:w-[84px] sm:h-[84px] bg-accent border-[3px] border-white shadow-[4px_4px_0_#000] font-black text-[1.3rem] sm:text-[1.6rem] text-ink flex-shrink-0"
       >
-        MM
+        DL
       </span>
       <div class="flex flex-row justify-center gap-[18px] flex-wrap">
         <router-link

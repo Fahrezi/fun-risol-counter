@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { api, type Food } from '../lib/api'
+import { computed, ref } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
+import { type Food } from '../lib/api'
 import FoodIcon from '../components/FoodIcon.vue'
+import {
+  queryKeys,
+  useCreateFoodMutation,
+  useDeleteFoodMutation,
+  useFoodsQuery,
+  useUpdateFoodMutation,
+} from '../lib/queries'
+
+const queryClient = useQueryClient()
 
 const ICON_OPTIONS = [
   { value: 'risol-mayo', label: 'Risol Mayo' },
@@ -17,7 +27,12 @@ const currency = new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 })
 
-const foods = ref<Food[]>([])
+const { data: foodsData } = useFoodsQuery()
+const createFood = useCreateFoodMutation()
+const updateFood = useUpdateFoodMutation()
+const deleteFood = useDeleteFoodMutation()
+
+const foods = computed(() => foodsData.value ?? [])
 const errorMsg = ref('')
 const newFood = ref({ name: '', price: 0, icon: 'generic' })
 
@@ -26,12 +41,6 @@ const editForm = ref({ name: '', price: 0, icon: 'generic' })
 const editError = ref('')
 
 const deleteTarget = ref<Food | null>(null)
-
-async function load() {
-  foods.value = await api.getFoods()
-}
-
-onMounted(load)
 
 function openEdit(f: Food) {
   editing.value = f
@@ -51,13 +60,16 @@ async function submitEdit() {
     return
   }
   try {
-    await api.updateFood(editing.value.id, {
-      name: editForm.value.name.trim(),
-      price: editForm.value.price,
-      icon: editForm.value.icon,
+    await updateFood.mutateAsync({
+      id: editing.value.id,
+      data: {
+        name: editForm.value.name.trim(),
+        price: editForm.value.price,
+        icon: editForm.value.icon,
+      },
     })
     editing.value = null
-    await load()
+    await queryClient.invalidateQueries({ queryKey: queryKeys.foods })
   } catch (e) {
     editError.value = e instanceof Error ? e.message : 'Gagal menyimpan.'
   }
@@ -73,9 +85,9 @@ function cancelDelete() {
 
 async function removeFood() {
   if (!deleteTarget.value) return
-  await api.deleteFood(deleteTarget.value.id)
+  await deleteFood.mutateAsync(deleteTarget.value.id)
   deleteTarget.value = null
-  await load()
+  await queryClient.invalidateQueries({ queryKey: queryKeys.foods })
 }
 
 async function addFood() {
@@ -84,9 +96,9 @@ async function addFood() {
     errorMsg.value = 'Isi nama dan harga (lebih dari 0).'
     return
   }
-  await api.createFood({ ...newFood.value })
+  await createFood.mutateAsync({ ...newFood.value })
   newFood.value = { name: '', price: 0, icon: 'generic' }
-  await load()
+  await queryClient.invalidateQueries({ queryKey: queryKeys.foods })
 }
 </script>
 
